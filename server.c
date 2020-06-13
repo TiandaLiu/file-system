@@ -7,7 +7,7 @@
 #include <sys/types.h>
 #include <math.h>
 #include <errno.h>
-#include "mfs.h"
+// #include "mfs.h"
 
 #define MFS_BLOCK_SIZE (4096)
 #define BUFFER_SIZE (8192)
@@ -22,6 +22,11 @@
 #define ENTRY_SIZE 256
 #define MFS_DIRECTORY    (0)
 #define MFS_REGULAR_FILE (1)
+
+typedef struct __MFS_DirEnt_t {
+    int  inum;      // inode number of entry (-1 means entry not used)
+    char name[252]; // up to 252 bytes of name in directory (including \0)
+} MFS_DirEnt_t;
 
 char* img_file;
 int fd;
@@ -145,6 +150,7 @@ int server_Write(int inum, char *buffer, int block) {
     lseek(fd,offset,SEEK_SET);
     write(fd, buffer, 4096);
     printf("finish write: %s\n", buffer);
+    fsync(fd);
     return 0;
 }
 
@@ -174,11 +180,7 @@ int server_Read(int inum, char *buffer, int block) {
             MFS_DirEnt_t *entry = malloc(sizeof(MFS_DirEnt_t));
             read(fd, entry, 256);
             printf("name: %s, name_index: %d len: %lu i%d\n",entry->name,entry->inum,strlen(entry->name),i);
-            // char *cur_name = malloc(sizeof(char)*252);
-            // int name_index;
-            // read(fd,cur_name,252);
-            // read(fd,&name_index,4);
-            // printf("name: %s, name_index: %d\n",cur_name,name_index);
+
             if (strlen(entry->name) == 0){
                 continue;
             }
@@ -188,28 +190,15 @@ int server_Read(int inum, char *buffer, int block) {
             for(int k=0;k<256;k++){
                 buffer[2+k+entry_num*ENTRY_SIZE] = entry_buffer[k];
             }
-            // MFS_DirEnt_t *try = (MFS_DirEnt_t *)entry_buffer;
-            // printf("try name :%s, try inum: %d \n", try->name, try->inum);
-            // strcat(buffer,entry_buffer);
-
-            // strcat(buffer,",");
-            // char index_str[4];
-            // sprintf(index_str, "%d", name_index);
-            // strcat(buffer,index_str);
-            // strcat(buffer,";");
             entry_num++;
         }
-        for (i = 0; i < 3; i++) {
-            e = buffer+2 + i * sizeof(MFS_DirEnt_t);
-            printf("e.inum = %d, e.name: %s\n", e->inum,e->name);    
-        }
+       
     } else {
         char file_content[MFS_BLOCK_SIZE];
         read(fd,file_content,MFS_BLOCK_SIZE);
 
         strcat(buffer, "1;");
         strcat(buffer, file_content);
-        printf("buffer: %s",buffer);
     }
 
     
@@ -241,6 +230,8 @@ int server_Creat(int pinum, int type, char *name) {
     if (find_empty_entry(pinum, &block_index, &entry_index) == -1){
         // if no empty entry in the blocks, add a new block to the directory
         block_index = add_new_block(pinum,info);
+        if(block_index == -1)
+            return -1;
         entry_index = 0;
     }
 
@@ -255,26 +246,8 @@ int server_Creat(int pinum, int type, char *name) {
 
     // update the directory blocks
     add_entry(pinum, block_index, entry_index, name, create_inode_index, info);
- //    offset = BLOCK_OFFSET + block_index * BLOCK_SIZE+entry_index*ENTRY_SIZE;
- //    printf("block offset: %d,block_index:%d,entry_index:%d\n", offset,block_index,entry_index);
- //    lseek(fd, offset, SEEK_SET);
- //    write(fd,name,252);
- //    write(fd, &create_inode_index,4);
- //    info[1] += 256;
-    // update_info(pinum,info);
-    // scan_directory_empty(block_index);
 
-
-    // /* check write*/
-    // lseek(fd, offset, SEEK_SET);
-    // char checkname[252];
-    // int checkindex;
-    // read(fd, checkname,252);
-    // read(fd, &checkindex,4);
-    // printf("check name : %s, checkindex: %d\n", checkname,checkindex);
-
-
-
+    fsync(fd);
     return 0;
 }
 
@@ -296,8 +269,18 @@ int server_Unlink(int pinum, char *name) {
     // traverse the blocks to delete the entry
     int inode_num, delete=1;
     printf("info: %d\n", info[2]);
+    int inode_info[3];
     for(int i=0;i<info[2];i++){
         inode_num = scan_directory(block_indices[i],name, &delete);
+
+        if (inode_num == -1)
+            return 0;
+
+        inode_stat(inode_num, inode_info);
+
+        if (inode_info[0] == MFS_DIRECTORY && inode_info[1]>2*ENTRY_SIZE)
+            return -1;
+
         if (inode_num >= 0){
             printf("unlink find the inode: %d\n", inode_num);
             if(delete == 2){   // need to delete this block
@@ -323,8 +306,7 @@ int server_Unlink(int pinum, char *name) {
             break;
         }
     }
-    int inode_info[3];
-       inode_stat(inode_num, inode_info);
+    
     int *inode_block_indices = malloc(sizeof(int)*inode_info[2]);
     get_all_blocks(inode_num, inode_block_indices);
 
@@ -339,7 +321,8 @@ int server_Unlink(int pinum, char *name) {
     // update the inode info struct of the pinum
     info[1] -= 256;
     update_info(pinum,info);
-     
+
+    fsync(fd);
     return 0;
 }
 
@@ -452,36 +435,6 @@ int scan_directory(int block_index, char* name, int *delete){
             
         }
 
-        // char *cur_name = malloc(sizeof(char)*252);
-        // name_index = -1;
-        // read(fd,cur_name,252);
-        // read(fd,&name_index,4);
-        // if (strlen(cur_name) == 0){
-        //     i++;
-        //     continue;
-        // }
-        
-        // printf("name: %s, name_index: %d len: %lu i%d\n",cur_name,name_index,strlen(cur_name),i);
-        // entry_num++;
-
-        // if (strcmp(cur_name,name) == 0){
-        //     printf("found: %s\n",cur_name);
-        //     if((*delete) == 0){
-        //         res = name_index;
-        //         // return name_index;
-        //     } else {
-        //         printf("entry need delete\n");
-        //         offset = BLOCK_OFFSET + block_index * BLOCK_SIZE + i*ENTRY_SIZE;
-        //         lseek(fd,offset,SEEK_SET);
-        //         char empty_byte = 0;
-        //         for(int i=0;i<ENTRY_SIZE;i++){
-        //             write(fd, &empty_byte, 1);
-        //         }
-        //         res = name_index;
-        //         entry_num--;
-        //     }
-            
-        // }
         i++;
     }
     if (res != -1){
@@ -667,7 +620,6 @@ int initiate_inode(int inum, int type, int pinum){
         int dir_block = add_new_block(inum, info);
         add_entry(inum, dir_block, 0, ".",inum,info);
         add_entry(inum, dir_block,1,"..",pinum,info);
-    //     printf("empty: %d\n",scan_directory_empty(dir_block));
     }
    
 
@@ -874,7 +826,14 @@ int main(int argc, char *argv[]) {
 
     int portid = atoi(argv[1]);
     img_file = argv[2];
-    create_img_file();
+
+    if( access( img_file, F_OK ) != -1 ) {
+        printf("img exists\n");
+    } else {
+        // file doesn't exist
+        printf("img not exists\n");
+        create_img_file();
+    }
     fd = open(img_file, O_RDWR);
 
     // test();
