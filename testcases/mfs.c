@@ -17,9 +17,7 @@ int split_string(char* input, char** output){
 }
 
 int MFS_Init(char *hostname, int port) {
-    int client_port = (rand() % 55535)+ 10000;
-    printf("client port: %d\n", client_port);
-    SOCKET = UDP_Open(client_port); //communicate through specified port, add random num later
+    SOCKET = UDP_Open(20000); //communicate through specified port, add random num later
     int rc = UDP_FillSockAddr(&addr, hostname, port);
     if (rc < 0) return -1;
     return 0;
@@ -77,7 +75,7 @@ int MFS_Write(int inum, char *buffer, int block) {
         int rc = UDP_Read(SOCKET, &addr2, recv_buffer, BUFFER_SIZE);
         printf("write return value: %d\n", atoi(recv_buffer));
         // check recv_buffer for validation
-        ret = atoi(recv_buffer); // success
+        ret = 0; // success
     }
     return ret;
 }
@@ -93,21 +91,7 @@ int MFS_Read(int inum, char *buffer, int block) {
         char recv_buffer[BUFFER_SIZE];
         int rc = UDP_Read(SOCKET, &addr2, recv_buffer, BUFFER_SIZE);
         // check recv_buffer for validation
-        char *output[COMMAND_NUM];
-        split_string(recv_buffer, output);
-        int status = atoi(output[0]);
-        int i = 1;
-        // strcpy(buffer, "");
-        // while (i <= 4096) {
-        //     strcat(buffer, output[i++]);
-        // }
-        strncpy(buffer, output[1], 4096);
-        if (status == 0) {
-            printf("it is a dir!\n");
-        } else {
-            printf("it is a file!\n");
-            // printf("file read return value: %s\n", buffer);
-        }
+        strcpy(buffer, recv_buffer);
         ret = 0; // success
         // load data from recv_buffer to *recv_buffer, need to be done
     }

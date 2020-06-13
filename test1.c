@@ -1,5 +1,5 @@
 #include <stdio.h>
-// #include "udp.h"
+#include "udp.h"
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -7,8 +7,8 @@
 #include <sys/types.h>
 #include <math.h>
 #include <errno.h>
-#include "mfs.h"
 
+#define MFS_BLOCK_SIZE (4096)
 #define BUFFER_SIZE (8192)
 #define COMMAND_NUM 5
 #define COMMAND_LEN 16
@@ -17,7 +17,7 @@
 #define INODE_OFFSET 1024
 #define BLOCK_BIT_ARR_OFFSET 512
 #define INODE_SIZE 52
-#define BLOCK_SIZE 4096
+#define BLOCK_SIZE (4096)
 #define ENTRY_SIZE 256
 #define MFS_DIRECTORY    (0)
 #define MFS_REGULAR_FILE (1)
@@ -25,6 +25,15 @@
 char* img_file;
 int fd;
 
+int initiate_inode(int inum, int type);
+int inode_stat(int inum, int* info);
+int verify_inum(int fd, int inum);
+int search_free_block();
+int search_free_inode();
+int add_new_block(int inum, int* info);
+int update_info(int inum, int* info);
+int scan_directory(int block_index, char* name,int *delete);
+int get_block_index(int inum, int block_num);
 int server_Lookup(int pinum, char *name);
 int server_Stat(int inum, char *reply);
 int server_Write(int inum, char *buffer, int block);
@@ -32,27 +41,66 @@ int server_Read(int inum, char *buffer, int block);
 int server_Creat(int pinum, int type, char *name);
 int server_Unlink(int pinum, char *name); 
 
-int find_empty_entry(int pinum, int *block_index, int *entry_index);
-int add_new_block(int inum, int *info);
-int add_entry(int inum, int block_index, int entry_index, char* name, int inode_index, int* info);
-int scan_directory(int block_index, char* name, int *delete);
-int scan_directory_empty(int block_index);
-int free_block(int block_index);
-int free_inode(int inode_index);
-int verify_inum(int fd, int inum);
-int search_free_block();
-int search_free_inode();
-int check_block_bit(int index);
-int check_inode_bit(int index);
-int initiate_inode(int inum, int type, int pinum);
-int inode_stat(int inum, int *info);
-int get_all_blocks(int inum, int *block_indices);
-int update_info(int inum, int* info);
-int get_block_index(int inum, int block_num);
-int extract_commands(char* input, char** all_commands);
-int initiate_inode(int inum, int type, int pinum);
+
+int extract_commands(char* input, char** all_commands){
+    int concurrent=0;
+    const char delim[3]= ";";
+    
+    // divide multiple commands
+    char *command = strtok(input, delim);       
+    int i=0;
+    while(command != NULL ) {
+        // printf("extract all: %s input %s\n", command,input);
+        all_commands[i] = (char *) malloc(sizeof(char)*COMMAND_LEN);
+        all_commands[i++] = command;
+        command = strtok(NULL, delim);
+    }
+    all_commands[i] = NULL;
+    // printf("extract_all finish\n");
+    return 0;
+}
+
+int create_img_file(){
+    int file_desc = open (img_file, O_RDWR | O_CREAT | O_TRUNC, 0777);
+    char init =  0;
+    printf("here file_desc: %d\n",file_desc);
+    // for(int i=0; i < TOTAL_NUM_BYTES; i++){
+    //     write(file_desc,&init, 1);
+    // }
+    fd = file_desc;
+    /* initiate the 0th inode: root directory */
+    initiate_inode(0,MFS_DIRECTORY);
+    
+    /* Change the corresponding bit array */
+    lseek(file_desc, 0, SEEK_SET);
+
+    char bit_arr = 1<<7;         // get the modified array
+    write(file_desc, &bit_arr, 1);      // write the modified array
+    
+    // /*check the first inode */
+    // lseek(file_desc, 0, SEEK_SET);
+    // char check[2];
+    // read(file_desc, check, 1);
+    // printf("check: %d, bit_array: %d\n", (int) check[0], bit_arr);
 
 
+    printf("rertu");
+    close(file_desc);
+    return 0;
+
+}
+
+/* Initiate the inode*/
+int initiate_inode(int inum, int type){
+    printf("initiate\n");
+    /* Initiate the inode block */
+    int offset = INODE_OFFSET+inum*INODE_SIZE;
+    int info[3] = {type, 0,0};
+    lseek(fd,offset,SEEK_SET);
+    write(fd, &info, 4*3);
+    
+    return 0;
+}
 
 /* 待会封装一下  get block_indices*/
 int server_Lookup(int pinum, char *name) {
@@ -60,7 +108,12 @@ int server_Lookup(int pinum, char *name) {
     int info[3];
     inode_stat(pinum,info);
     int *block_indices = malloc(sizeof(int)*info[2]);
-    get_all_blocks(pinum, block_indices);
+    int offset = INODE_OFFSET+pinum*INODE_SIZE+4*3;
+    lseek(fd, offset, SEEK_SET);
+
+    for(int i=0;i<info[2];i++){
+        read(fd, &block_indices[i],4);
+    }
 
     // read the blocks to see if the name already exists
     int exists,delete = 0;
@@ -89,9 +142,9 @@ int server_Stat(int inum, char *reply) {
             strcat(reply,";");
         printf("info: %d, reply:%s\n", info[i], reply);
     }
-
     return 0;
 }
+
 
 
 int server_Write(int inum, char *buffer, int block) {
@@ -114,7 +167,7 @@ int server_Write(int inum, char *buffer, int block) {
     int block_index;
     if (block == info[2]){
         // find and add a free block linked to the inode
-        block_index = add_new_block(inum, info);
+        block_index = add_new_block(inum,info);
         if ( block_index== -1)
             return -1;
 
@@ -132,7 +185,7 @@ int server_Write(int inum, char *buffer, int block) {
     offset = BLOCK_OFFSET + block_index*BLOCK_SIZE;
     printf("block_index: %d, offset: %d \n",block_index, offset);
     lseek(fd,offset,SEEK_SET);
-    write(fd, buffer, 4096);
+    write(fd, buffer, MFS_BLOCK_SIZE);
     printf("finish write: %s\n", buffer);
     return 0;
 }
@@ -140,10 +193,10 @@ int server_Write(int inum, char *buffer, int block) {
 
 
 int server_Read(int inum, char *buffer, int block) {
+    strcpy(buffer, "");
     if (verify_inum(fd, inum) == -1)
         return -1;
     int info[3];
-    strcpy(buffer, "");
     inode_stat(inum,info);
 
     /* validate the block number */
@@ -153,10 +206,9 @@ int server_Read(int inum, char *buffer, int block) {
     int block_index = get_block_index(inum, block);
     int offset = BLOCK_OFFSET+block_index*BLOCK_SIZE;
     printf("read offset: %d, blockindex: %d \n", offset,block_index);
-    lseek(fd, offset,SEEK_SET);
+    lseek(fd, offset, SEEK_SET);
     int i=0;
     if(info[0] == MFS_DIRECTORY){
-        strcat(buffer, "0;");
         while(i<9){
              i++;
             // char cur_name[252];
@@ -181,12 +233,11 @@ int server_Read(int inum, char *buffer, int block) {
     } else {
         char file_content[MFS_BLOCK_SIZE];
         read(fd,file_content,MFS_BLOCK_SIZE);
-        for(int i=0;i<4096;i++){
-            printf("%d:%d ",i,file_content[i]);
-        }
-        strcat(buffer, "1;");
-        strcat(buffer, file_content);
-        // printf("buffer: %s",buffer);
+        printf("file content: %s\n", file_content);
+
+        strcat(buffer,"1;");
+        strcat(buffer,file_content);
+        printf("buffer: %s\n",buffer);
     }
 
     
@@ -227,29 +278,26 @@ int server_Creat(int pinum, int type, char *name) {
     printf("inode %d\n", create_inode_index);
     if(create_inode_index == -1)
         return -1;
-    initiate_inode(create_inode_index, type,pinum);
+    initiate_inode(create_inode_index, type);
 
     // update the directory blocks
-    add_entry(pinum, block_index, entry_index, name, create_inode_index, info);
- //    offset = BLOCK_OFFSET + block_index * BLOCK_SIZE+entry_index*ENTRY_SIZE;
- //    printf("block offset: %d,block_index:%d,entry_index:%d\n", offset,block_index,entry_index);
- //    lseek(fd, offset, SEEK_SET);
- //    write(fd,name,252);
- //    write(fd, &create_inode_index,4);
- //    info[1] += 256;
-	// update_info(pinum,info);
-	// scan_directory_empty(block_index);
+    offset = BLOCK_OFFSET + block_index * BLOCK_SIZE+entry_index*ENTRY_SIZE;
+    // printf("block offset: %d,block_index:%d,entry_index:%d\n", offset,block_index,entry_index);
+    lseek(fd, offset, SEEK_SET);
+    write(fd,name,252);
+    write(fd, &create_inode_index,4);
 
+    /* check write*/
+    lseek(fd, offset, SEEK_SET);
+    char checkname[252];
+    int checkindex;
+    read(fd, checkname,252);
+    read(fd, &checkindex,4);
+    printf("check name : %s, checkindex: %d\n", checkname,checkindex);
 
-    // /* check write*/
-    // lseek(fd, offset, SEEK_SET);
-    // char checkname[252];
-    // int checkindex;
-    // read(fd, checkname,252);
-    // read(fd, &checkindex,4);
-    // printf("check name : %s, checkindex: %d\n", checkname,checkindex);
-
-
+    // update the size of the directory
+    info[1] += 256;
+    update_info(pinum, info);
 
     return 0;
 }
@@ -268,10 +316,10 @@ int server_Unlink(int pinum, char *name) {
 
     int *block_indices = malloc(sizeof(int)*info[2]);
    	get_all_blocks(pinum, block_indices);
-   	// printf("return from get all\n");
+   	printf("return from get all\n");
     // traverse the blocks to delete the entry
     int inode_num, delete=1;
-    printf("info: %d\n", info[2]);
+    printf("info: %d,block_indices[i] %d\n", info[2],block_indices[0]);
     for(int i=0;i<info[2];i++){
         inode_num = scan_directory(block_indices[i],name, &delete);
         if (inode_num >= 0){
@@ -343,7 +391,7 @@ int find_empty_entry(int pinum, int *block_index, int *entry_index){
 
 /* search a new block and link it with the inode, and change the info about number of blocks
 return: index of the block*/
-int add_new_block(int inum, int *info){
+int add_new_block(int inum, int* info){
     if(info[2] == 10)
         return -1;
     printf("add new block inum: %d\n", inum);
@@ -358,31 +406,12 @@ int add_new_block(int inum, int *info){
     write(fd, &block_index, 4);
 
     // update the blocks variable in info
-    // offset = INODE_OFFSET + inum*INODE_SIZE + 4*2;
-    // lseek(fd,offset,SEEK_SET);
+    offset = INODE_OFFSET + inum*INODE_SIZE + 4*2;
+    lseek(fd,offset,SEEK_SET);
     info[2] += 1;
-    update_info(inum,info);
-    // write(fd, &info[2] ,1);
+    write(fd, &info[2] ,1);
     return block_index;
 }
-
-/* write entry into blocks of a directory*/
-int add_entry(int inum, int block_index, int entry_index, char* name, int inode_index, int* info){
-	int offset = BLOCK_OFFSET + block_index * BLOCK_SIZE+entry_index*ENTRY_SIZE;
-    // printf("block offset: %d,block_index:%d,entry_index:%d,name: %s, inode_index: %d\n", offset,block_index,entry_index,name,inode_index);
-    lseek(fd, offset, SEEK_SET);
-    int resp = write(fd,name,252);
-    // printf("write: %d", resp);
-    resp = write(fd, &inode_index,4);
-    // printf("write: %d", resp);
-
-    
-    info[1] += 256;
-    update_info(inum, info);
-
-    return 0;
-}
-
 
 /* scan the block in the directory to fine name
 if delete = 1, need to erase this entry in the block
@@ -397,24 +426,22 @@ int scan_directory(int block_index, char* name, int *delete){
     lseek(fd,offset,SEEK_SET);
     printf("scan block_index :%d offset:%d\n", block_index,offset);
     int i=0, entry_num=0;
-    while(i<16){
-        char *cur_name = malloc(sizeof(char)*252);
-        name_index = -1;
-        read(fd,cur_name,252);
+    while(i<4096){
+        char cur_name[252];
+        read(fd,&cur_name,252);
         read(fd,&name_index,4);
-        if (strlen(cur_name) == 0){
+        if (cur_name == NULL || strlen(cur_name) == 0){
         	i++;
             continue;
         }
         
-        printf("name: %s, name_index: %d len: %lu i%d\n",cur_name,name_index,strlen(cur_name),i);
+        printf("name: %s, name_index: %d\n",cur_name,name_index);
         entry_num++;
 
         if (strcmp(cur_name,name) == 0){
             printf("found: %s\n",cur_name);
             if((*delete) == 0){
-            	res = name_index;
-                // return name_index;
+                return name_index;
             } else {
             	printf("entry need delete\n");
                 offset = BLOCK_OFFSET + block_index * BLOCK_SIZE + i*ENTRY_SIZE;
@@ -450,17 +477,17 @@ int scan_directory_empty(int block_index){
     lseek(fd,offset,SEEK_SET);
     int i=0, empty=-1;
     while(i<4096){
-    	char *cur_name = malloc(sizeof(char)*252);
-        read(fd,cur_name,252);
+    	char cur_name[252];
+        read(fd,&cur_name,252);
         read(fd,&name_index,4);
-        if (cur_name == NULL || strlen(cur_name) == 0){
+        if (strlen(cur_name) == 0){
         	printf("find empty entry: %d\n", i);
         	empty = i;
             break;
         }
         i++;
     }
-    printf("no empty entry:");
+    
     return empty;
 }
 
@@ -477,7 +504,6 @@ int free_block(int block_index){
 	block_bit = block_bit & mask;
 	lseek(fd,offset,SEEK_SET);
 	write(fd, &block_bit, 1);
-	return 0;
 }
 
 int free_inode(int inode_index){
@@ -490,7 +516,6 @@ int free_inode(int inode_index){
 	block_bit = block_bit & mask;
 	lseek(fd,offset,SEEK_SET);
 	write(fd, &block_bit, 1);
-	return 0;
 }
 
 int verify_inum(int fd, int inum) {
@@ -498,7 +523,7 @@ int verify_inum(int fd, int inum) {
     if (inum < 0 || inum >= 4096) {
         return -1;
     }
-    int byte_num = inum/8, bit_num = inum%8; 
+    int byte_num = inum/8, bit_num = inum%8;
     char mask = 1<<(7-bit_num);
     char block_bit;
     lseek(fd,byte_num,SEEK_SET);
@@ -567,9 +592,7 @@ int check_block_bit(int index){
 		printf("%d", bits[i]);
 	}
 	printf("\n");
-	return 0;
 }
-
 int check_inode_bit(int index){
 	char block_bit;
 	int offset = index;
@@ -584,35 +607,13 @@ int check_inode_bit(int index){
 		printf("%d", bits[i]);
 	}
 	printf("\n");
-	return 0;
 }
 
 /* ---------------------Functions Related to inode struct-------------------------------------- */
 
-/* Initiate the inode*/
-int initiate_inode(int inum, int type, int pinum){
-    
-    /* Initiate the inode block */
-    int offset = INODE_OFFSET+inum*INODE_SIZE;
-    printf("initiate type: %d, offset:%d\n",type, offset);
-    int info[3] = {type, 0,0};
-    update_info(inum, info);
-
-    /* if directory, add entries . and .. */
-    if(type == MFS_DIRECTORY){
-    	int dir_block = add_new_block(inum, info);
-    	add_entry(inum, dir_block, 0, ".",inum,info);
-    	add_entry(inum, dir_block,1,"..",pinum,info);
-    // 	printf("empty: %d\n",scan_directory_empty(dir_block));
-    }
-   
-
-    return 0;
-}
-
 int inode_stat(int inum, int *info){
     int offset = INODE_OFFSET+ inum*INODE_SIZE;
-    printf("stat offset:%d \n", offset);
+    // printf("stat offset:%d \n", offset);
     lseek(fd,offset,SEEK_SET);
     if (read(fd, info, 4*3) != 4*3)
         return -1;
@@ -635,7 +636,7 @@ int get_all_blocks(int inum, int *block_indices){
         read(fd, &block_indices[i],4);
         printf("block index: %d\n", block_indices[i]);
     }
-    printf("block total number: %d\n", info[2]);
+    printf("block total number: %d %d\n", info[2]);
     return info[2];
 }
 
@@ -643,8 +644,6 @@ int update_info(int inum, int* info){
     int offset = INODE_OFFSET + inum*INODE_SIZE;
     lseek(fd,offset,SEEK_SET);
     write(fd, info, 4*3);
-    inode_stat(inum,info);
-    return 0;
 }
 
 int get_block_index(int inum, int block_num){
@@ -656,69 +655,6 @@ int get_block_index(int inum, int block_num){
 }
 
 
-/* --------------------- Other Functions --------------------------------------  */
-int extract_commands(char* input, char** all_commands){
-    int concurrent=0;
-    const char delim[3]= ";";
-    
-    // divide multiple commands
-    char *command = strtok(input, delim);       
-    int i=0;
-    while(command != NULL ) {
-        // printf("extract all: %s input %s\n", command,input);
-        all_commands[i] = (char *) malloc(sizeof(char)*COMMAND_LEN);
-        all_commands[i++] = command;
-        command = strtok(NULL, delim);
-    }
-    all_commands[i] = NULL;
-    // printf("extract_all finish\n");
-    return 0;
-}
-
-int create_img_file(){
-    int file_desc = open (img_file, O_RDWR | O_CREAT | O_TRUNC, 0777);
-    char init =  0;
-    printf("here file_desc: %d\n",file_desc);
-    // for(int i=0; i < 4096; i++){
-    //     write(file_desc,&init, 1);
-    // }
-    
-    fd = file_desc;
-    // close(file_desc);
-
-    // file_desc = open(img_file,O_RDWR);
-    
-    /* Change the corresponding bit array */
-    lseek(file_desc, 0, SEEK_SET);
-
-    char bit_arr = (char) 1<<7;         // get the modified array
-    write(file_desc, &bit_arr, 1);      // write the modified array
-    
-    /* initiate the 0th inode: root directory */
-    initiate_inode(0,MFS_DIRECTORY,0);
-
-    // /*check the first inode */
-    // lseek(file_desc, 0, SEEK_SET);
-    // char check;
-    // read(file_desc, &check, 1);
-    // printf("check: %d, bit_array: %d\n", (int) check, bit_arr);
-
-    // check the first inode 
-    // lseek(file_desc, 1024, SEEK_SET);
-    // int checkinfo;
-    // for(int i=0;i<3;i++){
-    // 	int resp = read(file_desc, &checkinfo, 4);
-    // 	printf("read:%d, check: %d\n",resp,checkinfo);
-    // }
-    
-
-    printf("rertu");
-    close(file_desc);
-    return 0;
-
-}
-
-
 // int main(int argc, char *argv[])
 // {
 //     img_file = "image_file.txt";
@@ -726,87 +662,14 @@ int create_img_file(){
 
 //     fd = open(img_file, O_RDWR);
 
-//     // int info[3];
+//     int info[3];
     
-//     // int resp=1;
-
-//     // char* buffer = malloc(4096*sizeof(char));
-//     // for(int i=0;i<4096;i++){
-//     //     buffer[i] = '\0';
-//     // }
-    
-//     // char reply[BUFFER_SIZE];
-//     // for(int i=0;i<BUFFER_SIZE;i++){
-//     //     reply[i] = '\0';
-//     // }
-//     // lseek(fd, 0, SEEK_SET);
-//     // char check;
-//     // printf("start");
-//     // for(int i = 0;i<214230;i++){
-//     // 	read(fd, &check, 1);
-//     // 	// printf("%d",check);
-//     // 	printf("%c",check);
-//     // }
-//     // // char cur_name[252];
-//     // // lseek(fd,253,SEEK_SET);
-//     // // write(fd,&resp,4);
-//     // // lseek(fd, 1, SEEK_SET);
-//     // // read(fd, cur_name,252);
-//     // // printf("%s:%d\n", cur_name, strlen(cur_name));
-//     MFS_Stat_t stat;
-//     // scan_directory_empty(0);
-//   if (server_Creat(0, MFS_DIRECTORY, "usr") == -1)  {
-// 	  return -1;
-//   }
-//   printf("create success");
-//   int inode1 = server_Lookup(0, "usr");
-//   if (inode1 == -1){
-//   	printf("no lookup\n");
-// 	  return -1;
-//   }
-//   if (server_Creat(inode1, MFS_REGULAR_FILE, "file.txt") == -1){
-//   	printf("wrong 741");
-// 	  return -1;
-//   }
-
-//   int inode2 = server_Lookup(inode1, "file.txt");
-//   if (inode2 == -1)
-// 	  return -1;
-
-//   if (server_Stat(inode1, &stat) != 0){
-//   	printf("wrong 750");
-// 	  return -1;
-//   }
-//   if (stat.type != MFS_DIRECTORY){
-//   	printf("stat.type: %d\n",stat.type);
-// 	  // return -1;
-//   }
-//   if (stat.size !=  3 * sizeof(MFS_DirEnt_t)){
-//   	printf("stat.size: %d\n",stat.size);
-// 	  // return -1;
-//   }
-//   if (stat.blocks != 1)
-// 	  return -1;
-//   return 0;
-
-
-//     // resp = server_Creat(0,1,"dir1");
-//     // // server_Stat(1,reply);
-//     // // printf("%s\n", reply);
+//     int resp;
+//     // resp = server_Creat(0,0,"dir1");
 //     // printf("resp: %d\n", resp);
-//     // int inode = server_Lookup(0,"dir1");
-//     // resp = server_Write(inode,"miaomiao",0);
-//     // printf("resp: %d\n", resp);
-//     // resp = server_Read(inode,buffer,0);
-//     // printf("resp: %d\n", resp);
-//     // printf("buffer: %s\n", buffer);
 //     // resp = server_Creat(0,0,"dir2");
-//     // server_Stat(1,reply);
-//     // printf("%s\n", reply);
 //     // printf("resp: %d\n", resp);
 //     // resp = server_Creat(1,1,"dir1's file");
-//     // server_Stat(2,reply);
-//     // printf("%s\n", reply);
 //     // printf("resp: %d\n", resp);
 //     // resp = server_Lookup(1, "dir1's file");
 //     // printf("resp: %d\n", resp);
@@ -820,43 +683,52 @@ int create_img_file(){
 // 	// resp = server_Creat(0,1,"root's file2");
 // 	// printf("resp: %d\n", resp);
 
-
+//  //    char* buffer = malloc(4096*sizeof(char));
+//  //    for(int i=0;i<4096;i++){
+//  //        buffer[i] = '\0';
+//  //    }
     
+//  //    char reply[BUFFER_SIZE];
+//  //    for(int i=0;i<BUFFER_SIZE;i++){
+//  //        reply[i] = '\0';
+//  //    }
+
+//     // resp = server_Write(3,"miaomiao",0);
 //     // printf("resp: %d\n", resp);
 //     // resp = server_Read(3,buffer,0);
 //     // printf("resp: %d\n", resp);
 //     // server_Unlink(1,"dir1's file");
 
-// 	// check_block_bit(0);
-//  //    check_inode_bit(0);
+// 	check_block_bit(0);
+//     check_inode_bit(0);
     
-//     // resp = server_Lookup(0, "test");
-//     // printf("lookup resp: %d\n", resp);
-//     // resp = server_Creat(0, 0, "test");
-//     // printf("create resp: %d\n", resp);
-//     // resp = server_Lookup(0, "test");
-//     // printf("lookup resp: %d\n", resp);
+//     resp = server_Lookup(0, "test");
+//     printf("lookup resp: %d\n", resp);
+//     resp = server_Creat(0, 0, "test");
+//     printf("create resp: %d\n", resp);
+//     resp = server_Lookup(0, "test");
+//     printf("lookup resp: %d\n", resp);
 
-//     // resp = server_Lookup(0, "test.txt");
-//     // printf("lookup resp: %d\n", resp);
-//     // resp = server_Creat(0, 1, "test.txt");
-//     // printf("create resp: %d\n", resp);
-//     // resp = server_Lookup(0, "test.txt");
-//     // printf("lookup resp: %d\n", resp);
+//     resp = server_Lookup(0, "test.txt");
+//     printf("lookup resp: %d\n", resp);
+//     resp = server_Creat(0, 1, "test.txt");
+//     printf("create resp: %d\n", resp);
+//     resp = server_Lookup(0, "test.txt");
+//     printf("lookup resp: %d\n", resp);
 
-//     // resp = server_Lookup(0, "test");
-//     // printf("lookup resp: %d\n", resp);
-//     // resp = server_Creat(0, 0, "test");
-//     // printf("create resp: %d\n", resp);
-//     // resp = server_Lookup(0, "test");
-//     // printf("lookup resp: %d\n", resp);
+//     resp = server_Lookup(0, "test");
+//     printf("lookup resp: %d\n", resp);
+//     resp = server_Creat(0, 0, "test");
+//     printf("create resp: %d\n", resp);
+//     resp = server_Lookup(0, "test");
+//     printf("lookup resp: %d\n", resp);
     
-//     // resp = server_Lookup(0, "test.txt");
-//     // printf("lookup resp: %d\n", resp);
-//     // resp = server_Creat(0, 1, "test.txt");
-//     // printf("create resp: %d\n", resp);
-//     // resp = server_Lookup(0, "test.txt");
-//     // printf("lookup resp: %d\n", resp);
+//     resp = server_Lookup(0, "test.txt");
+//     printf("lookup resp: %d\n", resp);
+//     resp = server_Creat(0, 1, "test.txt");
+//     printf("create resp: %d\n", resp);
+//     resp = server_Lookup(0, "test.txt");
+//     printf("lookup resp: %d\n", resp);
 
 //     // resp = server_Lookup(1, "dir1's file");
 //     // printf("resp: %d\n", resp);
@@ -902,8 +774,6 @@ int create_img_file(){
 
 //     return 0;
 // }
-
-
 
 void test() {
     int resp;
@@ -961,7 +831,7 @@ void start_udp(portid) {
             sprintf(reply, "%d", resp);
             // printf("create resp: %d\n", resp);
         } else if (strcmp(all_commands[0], "unlink") == 0) {
-            resp = server_Unlink(atoi(all_commands[2]), all_commands[3]);
+            // resp = server_Unlink(atoi(all_commands[2]), atoi(all_commands[3]));
             sprintf(reply, "unlink");
         } else {
             printf("write content from client: %s\n", all_commands[4]);
@@ -990,3 +860,4 @@ int main(int argc, char *argv[]) {
     start_udp(portid);
     return 0;
 }
+
