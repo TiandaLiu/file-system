@@ -19,8 +19,6 @@ int main(int argc, char* argv[]) {
 	inodes[15] = MFS_Lookup(0, "..");
 	if (inodes[15] < 0) return -1;
 
-	
-
 	// double check if any inode num is reused
 	int j;
 	for (i = 0; i < 13; i++)
@@ -28,15 +26,14 @@ int main(int argc, char* argv[]) {
 		if (inodes[i] == inodes[j]) return -1;
 
 	// reread the dir block	
+	
   char buf[MFS_BLOCK_SIZE];
   memset(buf, 0, MFS_BLOCK_SIZE);
   if (MFS_Read(0, buf, 1) == 0)
 	  return -1;
-printf("passed .. .. \n");
   if (MFS_Read(0, buf, 0) == -1)
 	  return -1;
-		
-
+	
 	// sanity check
 	int b[16];
 	char* dirs2[16];

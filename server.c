@@ -62,7 +62,6 @@ int initiate_inode(int inum, int type, int pinum);
 
 /* 待会封装一下  get block_indices*/
 int server_Lookup(int pinum, char *name) {
-    printf("lookup\n");
     if (verify_inum(pinum)==-1){
         return -1;
     }
@@ -146,10 +145,8 @@ int server_Write(int inum, char *buffer, int block) {
     }
     // write the file
     offset = BLOCK_OFFSET + block_index*BLOCK_SIZE;
-    printf("block_index: %d, offset: %d \n",block_index, offset);
     lseek(fd,offset,SEEK_SET);
     write(fd, buffer, 4096);
-    printf("finish write: %s\n", buffer);
     fsync(fd);
     return 0;
 }
@@ -170,7 +167,6 @@ int server_Read(int inum, char *buffer, int block) {
 
     int block_index = get_block_index(inum, block);
     int offset = BLOCK_OFFSET+block_index*BLOCK_SIZE;
-    printf("read offset: %d, blockindex: %d \n", offset,block_index);
     lseek(fd, offset,SEEK_SET);
     int i=0, entry_num = 0;
     if(info[0] == MFS_DIRECTORY){
@@ -179,8 +175,6 @@ int server_Read(int inum, char *buffer, int block) {
             i++;
             MFS_DirEnt_t *entry = malloc(sizeof(MFS_DirEnt_t));
             read(fd, entry, 256);
-            printf("name: %s, name_index: %d len: %lu i%d\n",entry->name,entry->inum,strlen(entry->name),i);
-
             if (strlen(entry->name) == 0){
                 continue;
             }
@@ -209,7 +203,6 @@ int server_Read(int inum, char *buffer, int block) {
 
 int server_Creat(int pinum, int type, char *name) {
     /* judge the validity of the inum*/
-    printf("enter create\n");
     if (verify_inum(pinum) == -1)
         return -1;
 
@@ -235,11 +228,9 @@ int server_Creat(int pinum, int type, char *name) {
         entry_index = 0;
     }
 
-    printf("block_index:%d,entry_index:%d\n",block_index,entry_index);
 
     // create a new inode for the new file
     int create_inode_index = search_free_inode();
-    printf("inode %d\n", create_inode_index);
     if(create_inode_index == -1)
         return -1;
     initiate_inode(create_inode_index, type,pinum);
@@ -268,7 +259,6 @@ int server_Unlink(int pinum, char *name) {
        // printf("return from get all\n");
     // traverse the blocks to delete the entry
     int inode_num, delete=1;
-    printf("info: %d\n", info[2]);
     int inode_info[3];
     for(int i=0;i<info[2];i++){
         inode_num = scan_directory(block_indices[i],name, &delete);
@@ -282,19 +272,15 @@ int server_Unlink(int pinum, char *name) {
             return -1;
 
         if (inode_num >= 0){
-            printf("unlink find the inode: %d\n", inode_num);
             if(delete == 2){   // need to delete this block
-                printf("need to delete the block\n");
                 // if the block is the last block
                 if (i == info[2]-1){
-                    printf("the last block\n");
                     offset = INODE_OFFSET+pinum*INODE_SIZE+4*3+(info[2]-1)*4;
                     lseek(fd,offset,SEEK_SET);
                     int empty_index = 0;
                     write(fd, &empty_index,4);
                 } else {
                     // read the last block and move the last block
-                    printf("not the last block\n");
                     int last_index = get_block_index(pinum, info[2]-1);
                     offset = INODE_OFFSET+pinum*INODE_SIZE+4*3+i*4;
                     lseek(fd, offset, SEEK_SET);
@@ -354,7 +340,6 @@ return: index of the block*/
 int add_new_block(int inum, int *info){
     if(info[2] == 10)
         return -1;
-    printf("add new block inum: %d\n", inum);
     int offset;
     int block_index = search_free_block();
     if (block_index == -1)
@@ -381,7 +366,6 @@ int add_entry(int inum, int block_index, int entry_index, char* name, int inode_
     MFS_DirEnt_t *entry = malloc(sizeof(MFS_DirEnt_t));
     strncpy(entry->name, name,252);
     entry->inum = inode_index;
-    printf("add_entry: entry name: %s, inum: %d, block index:%d,entry_index:%d,offset:%d\n", entry->name,entry->inum, block_index,entry_index,offset);
     lseek(fd, offset, SEEK_SET);
     write(fd,entry,256);
     // int resp = write(fd,name,252);
@@ -403,26 +387,21 @@ return: n (n>0) the inode number of the name
         -1 cannot find the entry
 */
 int scan_directory(int block_index, char* name, int *delete){
-    printf("enther scan\n");
     int name_index,res=-1;
 
     int offset = BLOCK_OFFSET+block_index * BLOCK_SIZE;
     lseek(fd,offset,SEEK_SET);
-    printf("scan block_index :%d offset:%d\n", block_index,offset);
     int i=0, entry_num=0;
     while(i<16){
         MFS_DirEnt_t *entry = malloc(sizeof(MFS_DirEnt_t));
         read(fd, entry, 256);
-        printf("name: %s, name_index: %d len: %lu i%d\n",entry->name,entry->inum,strlen(entry->name),i);
         entry_num++;
 
         if (strcmp(entry->name,name) == 0){
-            printf("found: %s\n",entry->name);
             if((*delete) == 0){
                 res = entry->inum;
                 // return name_index;
             } else {
-                printf("entry need delete\n");
                 offset = BLOCK_OFFSET + block_index * BLOCK_SIZE + i*ENTRY_SIZE;
                 lseek(fd,offset,SEEK_SET);
                 char empty_byte = 0;
@@ -459,16 +438,14 @@ int scan_directory_empty(int block_index){
     while(i<16){
         MFS_DirEnt_t *entry = malloc(sizeof(MFS_DirEnt_t));
         read(fd, entry, 256);
-        printf("name: %s, name_index: %d len: %lu i%d\n",entry->name,entry->inum,strlen(entry->name),i);
         if (strlen(entry->name) == 0){
-            printf("find empty entry: %d\n", i);
             empty = i;
             break;
         }
         i++;
     }
-    if(empty == -1)
-        printf("no empty entry:");
+    // if(empty == -1)
+    //     printf("no empty entry:");
     return empty;
 }
 
@@ -486,12 +463,10 @@ int free_block(int block_index){
     lseek(fd,offset,SEEK_SET);
     write(fd, &block_bit, 1);
 
-    printf("free block %d\n", block_index);
     return 0;
 }
 
 int free_inode(int inode_index){
-    printf("free inode: %d\n", inode_index);
     int byte_num = inode_index/8, bit_num = inode_index%8;
     int offset = byte_num;
     char block_bit;
@@ -510,7 +485,6 @@ int free_inode(int inode_index){
    return 1, if invalid
 */
 int verify_inum(int inum) {
-    printf("verify\n");
     if (inum < 0 || inum >= 4096) {
         return -1;
     }
@@ -522,7 +496,6 @@ int verify_inum(int inum) {
     // printf("block: %d\n",block_bit);
     if( (block_bit & mask) == 0)
         return -1;
-    printf("verify success\n");
     return 0;
 }
 
@@ -541,7 +514,6 @@ int search_free_block(){
                 lseek(fd,BLOCK_BIT_ARR_OFFSET+i,SEEK_SET);
                 cur = cur | mask;
                 write(fd, &cur, 1);
-                printf("search new block: %d\n", i*8+k);
                 return i*8+k;
             }
         }
@@ -562,7 +534,6 @@ int search_free_inode(){
                 lseek(fd,i,SEEK_SET);
                 cur = cur | mask;
                 write(fd, &cur, 1);
-                printf("search new inode: %d\n", i*8+k);
                 return i*8+k;
             }
         }
@@ -611,7 +582,6 @@ int initiate_inode(int inum, int type, int pinum){
     
     /* Initiate the inode block */
     int offset = INODE_OFFSET+inum*INODE_SIZE;
-    printf("initiate type: %d, offset:%d\n",type, offset);
     int info[3] = {type, 0,0};
     update_info(inum, info);
 
@@ -631,14 +601,13 @@ int inode_stat(int inum, int *info){
         return -1;
     }
     int offset = INODE_OFFSET+ inum*INODE_SIZE;
-    printf("stat offset:%d \n", offset);
     lseek(fd,offset,SEEK_SET);
     if (read(fd, info, 4*3) != 4*3)
         return -1;
     // printf(info == NULL);
-    for(int i=0;i<3;i++){
-        printf("stat: %d\n",info[i]);
-    }
+    // for(int i=0;i<3;i++){
+    //     printf("stat: %d\n",info[i]);
+    // }
     return 0;
 }
 
@@ -660,7 +629,6 @@ int get_block_index(int inum, int block_num){
 }
 
 int get_all_blocks(int inum, int *block_indices){
-    printf("get_all blocks\n");
     int info[3], offset;
     int stat = inode_stat(inum, info);
     // block_indices = malloc(sizeof(int)*info[2]);
@@ -669,9 +637,7 @@ int get_all_blocks(int inum, int *block_indices){
 
     for(int i=0;i<info[2];i++){
         read(fd, &block_indices[i],4);
-        printf("block index: %d\n", block_indices[i]);
     }
-    printf("block total number: %d\n", info[2]);
     return info[2];
 }
 
@@ -697,7 +663,6 @@ int extract_commands(char* input, char** all_commands){
 int create_img_file(){
     int file_desc = open (img_file, O_RDWR | O_CREAT | O_TRUNC, 0777);
     char init =  0;
-    printf("here file_desc: %d\n",file_desc);
     // for(int i=0; i < 4096; i++){
     //     write(file_desc,&init, 1);
     // }
@@ -731,39 +696,11 @@ int create_img_file(){
     // }
     
 
-    printf("rertu");
     close(file_desc);
     return 0;
 
 }
 
-
-
-void test() {
-    int resp;
-    resp = server_Creat(0, MFS_REGULAR_FILE, "file.txt");
-    printf("create resp: %d\n", resp);
-
-    int inode = server_Lookup(0, "file.txt");
-    printf("inode of file.txt: %d\n", inode);
-
-    char buf[MFS_BLOCK_SIZE];
-    memset(buf, 99, MFS_BLOCK_SIZE);
-    printf("buf to write: %s\n", buf);
-
-    resp = server_Write(inode, buf, 0);
-    printf("write resp: %d\n", resp);
-
-    char result[MFS_BLOCK_SIZE];
-    memset(result, 98, MFS_BLOCK_SIZE);
-    resp = server_Read(inode, result, 0);
-    printf("read resp: %d\n", resp);
-
-    printf("read result: %s\n", result);
-    if (memcmp(result, buf, MFS_BLOCK_SIZE) != 0) {
-        printf("diff\n");
-    }
-}
 
 void start_udp(portid) {
 
@@ -779,7 +716,7 @@ void start_udp(portid) {
     if (rc > 0) {
         char *all_commands[COMMAND_NUM], reply[BUFFER_SIZE];
         int resp;
-        printf("SERVER:: read %d bytes (message: '%s')\n", rc, buffer);
+        // printf("SERVER:: read %d bytes (message: '%s')\n", rc, buffer);
         extract_commands(buffer, all_commands);
         if (strcmp(all_commands[0], "lookup") == 0) {
             resp = server_Lookup(atoi(all_commands[2]), all_commands[3]);

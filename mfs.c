@@ -35,7 +35,7 @@ int split_write_string(char* input, char* output) {
 
 int MFS_Init(char *hostname, int port) {
     int client_port = (rand() % 55535)+ 10000;
-    printf("client port: %d\n", client_port);
+    // printf("client port: %d\n", client_port);
     SOCKET = UDP_Open(client_port); //communicate through specified port, add random num later
     int rc = UDP_FillSockAddr(&addr, hostname, port);
     if (rc < 0) return -1;
@@ -44,7 +44,6 @@ int MFS_Init(char *hostname, int port) {
 
 int MFS_Lookup(int pinum, char *name) {
     // return inum of file if success, else -1
-    printf("sending lookup request...\n");
     int num_argument = 2, inum = -1;
     char *method_name = "lookup";
     char message[BUFFER_SIZE];
@@ -71,7 +70,6 @@ int MFS_Lookup(int pinum, char *name) {
         }
         char recv_buffer[BUFFER_SIZE];
         int rc = UDP_Read(SOCKET, &addr2, recv_buffer, BUFFER_SIZE);
-        printf("lookup return value: %d\n", atoi(recv_buffer));
         // check recv_buffer for validation
         inum = atoi(recv_buffer);
     }
@@ -150,7 +148,6 @@ int MFS_Write(int inum, char *buffer, int block) {
 
         char recv_buffer[BUFFER_SIZE];
         int rc = UDP_Read(SOCKET, &addr2, recv_buffer, BUFFER_SIZE);
-        printf("write return value: %d\n", atoi(recv_buffer));
         // check recv_buffer for validation
         ret = atoi(recv_buffer); // success
     }
@@ -197,15 +194,15 @@ int MFS_Read(int inum, char *buffer, int block) {
         // while (i <= 4096) {
         //     strcat(buffer, output[i++]);
         // }
-        for(int i=0;i<4096;i++){
-            printf("i%d: %d ",i,buffer[i]);
-        }
-        if (status == 0) {
-            printf("it is a dir!\n");
-        } else {
-            printf("it is a file!\n");
-            // printf("file read return value: %s\n", buffer);
-        }
+        // for(int i=0;i<4096;i++){
+        //     printf("i%d: %d ",i,buffer[i]);
+        // }
+        // if (status == 0) {
+        //     printf("it is a dir!\n");
+        // } else {
+        //     printf("it is a file!\n");
+        //     // printf("file read return value: %s\n", buffer);
+        // }
         ret = 0; // success
         // load data from recv_buffer to *recv_buffer, need to be done
     }
@@ -241,7 +238,6 @@ int MFS_Creat(int pinum, int type, char *name) {
 
         char recv_buffer[BUFFER_SIZE];
         int rc = UDP_Read(SOCKET, &addr2, recv_buffer, BUFFER_SIZE);
-        printf("create return value: %d\n", atoi(recv_buffer));
         // check recv_buffer for validation
         ret = atoi(recv_buffer);
     }

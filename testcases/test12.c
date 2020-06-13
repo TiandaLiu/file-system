@@ -20,18 +20,13 @@ int main(int argc, char* argv[]) {
 
   if (MFS_Stat(inode1, &stat) != 0)
 	  return -1;
-  if (stat.type != MFS_DIRECTORY) {
-    printf("type: %d\n", stat.type);
+  if (stat.type != MFS_DIRECTORY)
 	  return -1;
-  }
-  if (stat.size !=  3 * sizeof(MFS_DirEnt_t)) {
-    printf("size: %d, ans: %d\n", stat.size, 3 * sizeof(MFS_DirEnt_t));
+  if (stat.size !=  3 * sizeof(MFS_DirEnt_t))
 	  return -1;
-  }
-  if (stat.blocks != 1) {
-    printf("blocks: %d\n", stat.blocks);
+  if (stat.blocks != 1)
 	  return -1;
-  }
   return 0;
 
 }
+

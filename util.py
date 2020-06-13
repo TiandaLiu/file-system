@@ -49,7 +49,7 @@ def start_fresh_server(port):
     commands.getoutput("rm -rf " + fsimage)
     commands.getoutput("rm -rf server-out.txt")
     cmd = "./server " + port + " " + fsimage
-    os.system(cmd + " > server-out.txt &") #  > server-out.txt
+    os.system(cmd + " > server-out.txt &")
     time.sleep(1)
     ps = commands.getoutput("ps -ax")
     if ps.find(cmd) == -1:

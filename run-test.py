@@ -45,17 +45,14 @@ def run_test(testcase):
         rc = util.compile_testclient(testcase)
         if rc == -1:
             return -1
-        print("compile succ")
         
         rc = util.start_fresh_server(port)
         if rc == -1:
             return -1
-        print("server succ")
 
         status, out = commands.getstatusoutput("./testclient %s %s"
                                                % (port, host))
 #        print out
-        print("status: {}, out: {}".format(status, out))
         commands.getoutput("killall -9 server")
         return status
 
