@@ -58,8 +58,17 @@ int initiate_inode(int inum, int type, int pinum);
 /* 待会封装一下  get block_indices*/
 int server_Lookup(int pinum, char *name) {
     printf("lookup\n");
+    if (verify_inum(pinum)==-1){
+        return -1;
+    }
+
     int info[3];
     inode_stat(pinum,info);
+
+    if(info[0] != MFS_DIRECTORY){
+        return -1;
+    }
+
     int *block_indices = malloc(sizeof(int)*info[2]);
     get_all_blocks(pinum, block_indices);
 
@@ -125,9 +134,10 @@ int server_Write(int inum, char *buffer, int block) {
 
     } else {
         // obtain the block's index
-        offset = INODE_OFFSET+inum*INODE_SIZE+4*3+block*4;
-        lseek(fd,offset,SEEK_SET);
-        read(fd, &block_index, 4);
+        block_index = get_block_index(inum,block);
+        // offset = INODE_OFFSET+inum*INODE_SIZE+4*3+block*4;
+        // lseek(fd,offset,SEEK_SET);
+        // read(fd, &block_index, 4);
     }
     // write the file
     offset = BLOCK_OFFSET + block_index*BLOCK_SIZE;
@@ -524,7 +534,6 @@ int free_block(int block_index){
     write(fd, &block_bit, 1);
 
     printf("free block %d\n", block_index);
-    search_free_block();
     return 0;
 }
 
