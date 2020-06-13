@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/select.h>
 #include "udp.h"
 
 #define MFS_DIRECTORY    (0)
@@ -13,6 +14,7 @@
 #define BUFFER_SIZE (8192)
 #define COMMAND_NUM (5)
 #define COMMAND_LEN (16)
+#define TIMEOUT (5)
 int SOCKET;
 struct sockaddr_in addr, addr2;
 
